@@ -219,7 +219,7 @@ class AIService:
 
         # Map tool name → Intent
         intent_map = {
-            "update_project_status": Intent.UPDATE_PROJECT_STATUS
+            "update_project_status": Intent.UPDATE_PROJECT_STATUS,
             "add_task":              Intent.ADD_TASK,
             "update_task_status":    Intent.UPDATE_TASK_STATUS,
             "add_note":              Intent.ADD_NOTE,
