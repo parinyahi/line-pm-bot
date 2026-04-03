@@ -12,13 +12,12 @@ class Config:
     LINE_CHANNEL_SECRET: str = os.getenv("LINE_CHANNEL_SECRET", "")
     LINE_CHANNEL_ACCESS_TOKEN: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
-    # ── Anthropic (Claude) ──────────────────────────────────────────────────
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
+    # ── OpenRouter ──────────────────────────────────────────────────────────
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
 
     # ── Notion ──────────────────────────────────────────────────────────────
     NOTION_API_KEY: str = os.getenv("NOTION_API_KEY", "")
-    # IDs of the three Notion databases (set after running setup_notion.py)
     NOTION_PROJECTS_DB_ID: str = os.getenv("NOTION_PROJECTS_DB_ID", "")
     NOTION_TASKS_DB_ID: str = os.getenv("NOTION_TASKS_DB_ID", "")
     NOTION_UPDATES_DB_ID: str = os.getenv("NOTION_UPDATES_DB_ID", "")
