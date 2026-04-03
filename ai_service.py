@@ -192,7 +192,7 @@ class AIService:
                 model=self.model,
                 max_tokens=1024,
                 tools=TOOLS,
-                tool_choice="auto",
+                tool_choice="required",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": f"Reporter: {reporter}\nMessage: {message}"},
