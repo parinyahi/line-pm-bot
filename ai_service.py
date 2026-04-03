@@ -1,10 +1,10 @@
 """
-AI service – uses OpenRouter (Step 3.5 Flash) to parse natural language
-messages into structured project-management intents via tool calling.
+AI service – uses OpenRouter to parse natural language messages into
+structured project-management intents via JSON text output.
 """
 import json
 import logging
-from typing import Any
+import re
 
 from openai import OpenAI
 
@@ -13,166 +13,24 @@ from models import Intent, ParsedIntent
 
 logger = logging.getLogger(__name__)
 
-# ── Tool definitions (OpenAI-compatible format) ───────────────────────────────
+SYSTEM_PROMPT = """Parse the message and reply ONLY with a JSON object. No explanation.
 
-TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "update_project_status",
-            "description": "Update the status of a project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "Name of the project"},
-                    "status": {
-                        "type": "string",
-                        "enum": ["Not Started", "In Progress", "On Hold", "Completed", "Cancelled"],
-                        "description": "New status for the project",
-                    },
-                    "note": {"type": "string", "description": "Optional note to attach to this update"},
-                },
-                "required": ["project_name", "status"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_task",
-            "description": "Add a new task to a project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "task_name": {"type": "string"},
-                    "assignee": {"type": "string", "description": "Person responsible for the task"},
-                    "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format"},
-                    "note": {"type": "string", "description": "Optional description / note"},
-                },
-                "required": ["project_name", "task_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_task_status",
-            "description": "Update the status of a specific task.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "task_name": {"type": "string"},
-                    "status": {
-                        "type": "string",
-                        "enum": ["Todo", "In Progress", "In Review", "Done", "Blocked"],
-                    },
-                    "note": {"type": "string"},
-                },
-                "required": ["task_name", "status"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_note",
-            "description": "Add a general note or update log entry for a project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "note": {"type": "string", "description": "The note content"},
-                },
-                "required": ["project_name", "note"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_project",
-            "description": "Query the status and details of a project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                },
-                "required": ["project_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_task",
-            "description": "Query the status and details of a specific task.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "task_name": {"type": "string"},
-                },
-                "required": ["task_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_projects",
-            "description": "List all projects, optionally filtered by status.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "status_filter": {
-                        "type": "string",
-                        "enum": ["Not Started", "In Progress", "On Hold", "Completed", "Cancelled", "all"],
-                        "description": "Filter by status, or 'all' for all projects",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tasks",
-            "description": "List tasks for a project, optionally filtered by status.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string"},
-                    "status_filter": {
-                        "type": "string",
-                        "enum": ["Todo", "In Progress", "In Review", "Done", "Blocked", "all"],
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-]
+JSON fields: intent, project_name, task_name, status, status_filter, assignee, due_date, note
+(use null for unused fields)
 
+Intents and when to use them:
+- update_project_status: change project status → needs project_name + status (Not Started|In Progress|On Hold|Completed|Cancelled)
+- add_task: add task to project → needs project_name + task_name
+- update_task_status: change task status → needs task_name + status (Todo|In Progress|In Review|Done|Blocked)
+- add_note: log a note → needs project_name + note
+- query_project: get project info → needs project_name
+- query_task: get task info → needs task_name
+- list_projects: list all projects → optional status_filter (Not Started|In Progress|On Hold|Completed|Cancelled|all)
+- list_tasks: list tasks → optional project_name + status_filter (Todo|In Progress|In Review|Done|Blocked|all)
 
-SYSTEM_PROMPT = """You are an AI assistant for a project management bot on LINE.
-Your job is to understand team members' natural language messages and call the
-appropriate tool to record or retrieve project information.
-
-Guidelines:
-- Always call exactly one tool that best matches the user's intent.
-- If you cannot determine the intent clearly, call 'query_project' or 'list_projects'.
-- Extract project names and task names as they appear in the message.
-- Infer status from keywords: "done/finished/complete" -> Done/Completed,
-  "started/working on/in progress" -> In Progress, "blocked/stuck" -> Blocked,
-  "on hold/paused" -> On Hold.
-- Dates: convert relative terms like "tomorrow", "next Friday" to YYYY-MM-DD
-  (use today = {today}).
-- Keep note content concise and informative.
-- The reporter field comes from the user's display name, passed separately.
-"""
+Status keywords: done/finished/complete→Done or Completed, started/working on→In Progress, blocked/stuck→Blocked, on hold/paused→On Hold
+Today: {today}. Convert relative dates to YYYY-MM-DD.
+Default to list_projects if unclear."""
 
 
 class AIService:
@@ -184,15 +42,13 @@ class AIService:
         self.model = config.OPENROUTER_MODEL
 
     def parse_intent(self, message: str, reporter: str = "Unknown", today: str = "") -> ParsedIntent:
-        """Parse a LINE message into a structured ParsedIntent."""
+        """Parse a LINE message into a structured ParsedIntent via JSON output."""
         system = SYSTEM_PROMPT.replace("{today}", today or "unknown")
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=1024,
-                tools=TOOLS,
-                tool_choice="required",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": f"Reporter: {reporter}\nMessage: {message}"},
@@ -202,22 +58,25 @@ class AIService:
             logger.error("OpenRouter API error: %s", exc)
             return ParsedIntent(intent=Intent.UNKNOWN, raw_message=message, reporter=reporter)
 
-        # Extract tool call from response
-        choice = response.choices[0]
-        tool_calls = getattr(choice.message, "tool_calls", None)
+        raw = (response.choices[0].message.content or "").strip()
+        logger.debug("Raw AI response: %s", raw)
 
-        if not tool_calls:
-            logger.warning("No tool call returned for message: %s", message)
+        if not raw:
+            logger.warning("Empty response from model for: %s", message)
             return ParsedIntent(intent=Intent.UNKNOWN, raw_message=message, reporter=reporter)
 
-        tool_call = tool_calls[0]
-        tool_name: str = tool_call.function.name
-        try:
-            inputs: dict = json.loads(tool_call.function.arguments)
-        except (json.JSONDecodeError, TypeError):
-            inputs = {}
+        # Strip markdown code fences if present
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            logger.warning("No JSON found in response: %s", raw)
+            return ParsedIntent(intent=Intent.UNKNOWN, raw_message=message, reporter=reporter)
 
-        # Map tool name → Intent
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON: %s", raw)
+            return ParsedIntent(intent=Intent.UNKNOWN, raw_message=message, reporter=reporter)
+
         intent_map = {
             "update_project_status": Intent.UPDATE_PROJECT_STATUS,
             "add_task":              Intent.ADD_TASK,
@@ -228,16 +87,17 @@ class AIService:
             "list_projects":         Intent.LIST_PROJECTS,
             "list_tasks":            Intent.LIST_TASKS,
         }
-        intent = intent_map.get(tool_name, Intent.UNKNOWN)
+        intent = intent_map.get(data.get("intent", ""), Intent.UNKNOWN)
+        logger.info("Parsed intent=%s data=%s", intent.value, data)
 
         return ParsedIntent(
             intent=intent,
-            project_name=inputs.get("project_name"),
-            task_name=inputs.get("task_name"),
-            status=inputs.get("status") or inputs.get("status_filter"),
-            note=inputs.get("note"),
-            assignee=inputs.get("assignee"),
-            due_date=inputs.get("due_date"),
+            project_name=data.get("project_name"),
+            task_name=data.get("task_name"),
+            status=data.get("status") or data.get("status_filter"),
+            note=data.get("note"),
+            assignee=data.get("assignee"),
+            due_date=data.get("due_date"),
             reporter=reporter,
             raw_message=message,
         )

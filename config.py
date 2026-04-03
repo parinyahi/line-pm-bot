@@ -14,7 +14,7 @@ class Config:
 
     # ── OpenRouter ──────────────────────────────────────────────────────────
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 
     # ── Notion ──────────────────────────────────────────────────────────────
     NOTION_API_KEY: str = os.getenv("NOTION_API_KEY", "")
