@@ -165,6 +165,7 @@ class AIService:
                 max_tokens=1024,
                 system=system,
                 tools=TOOLS,
+                tool_choice={"type": "any"},
                 messages=[
                     {
                         "role": "user",
@@ -212,27 +213,6 @@ class AIService:
             reporter=reporter,
             raw_message=message,
         )
-
-    def generate_friendly_response(self, result_summary: str, intent: Intent) -> str:
-        """Generate a short, friendly Thai/English mixed response for the LINE user."""
-        prompt = (
-            f"You are a friendly project manager bot on LINE (Thai context).\n"
-            f"The user performed action: {intent.value}\n"
-            f"Result: {result_summary}\n\n"
-            f"Write a SHORT (2-4 sentences), friendly confirmation or answer in English. "
-            f"Use emoji sparingly. Be concise — LINE messages should be brief."
-        )
-        try:
-            resp = self.client.messages.create(
-                model=config.CLAUDE_MODEL,
-                max_tokens=256,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return resp.content[0].text.strip()
-        except Exception as exc:
-            logger.error("Error generating response: %s", exc)
-            return result_summary
-
 
 # Singleton
 ai_service = AIService()
